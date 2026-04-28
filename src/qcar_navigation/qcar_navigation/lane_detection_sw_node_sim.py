@@ -1,25 +1,16 @@
 #!/usr/bin/env python3
 """
 =======================================================================
- Lane Detection Node — QCar Navigation | Sudo Drive
+ Lane Detection Node (SIM) — QCar Navigation | Sudo Drive
  Authors: Abraham Moro-Hernandez (AMH19)
 -----------------------------------------------------------------------
  SW + Poly2 v6 — UNA SOLA LÍNEA AMARILLA CENTRAL
+ Versión simulación: idéntica a lane_detection_sw_node.py.
+ Los tópicos de entrada/salida son los mismos porque la imagen
+ ya llega correguida desde undistorted_node_sim.
 
- Diseñado para:
-   - Una cinta amarilla central que divide dos carriles
-   - Interior con luz variable (ventanas, sol directo)
-   - El QCar sigue la línea central manteniéndola centrada en el frame
-
- Cambio fundamental vs versiones anteriores:
-   NO se buscan dos líneas L y R para calcular un centro.
-   Se detecta UNA SOLA línea amarilla y se publica su posición.
-   El error lateral = posición_línea - centro_imagen
-
- Pipeline:
-   BGR → CLAHE → HSV → máscara amarillo
-   → ROI → histograma → UN SOLO conjunto de ventanas
-   → polyfit de la línea central → publicar centroide = posición línea
+ Subscribed Topics:
+   /amh19/undistorted/csi_front  (sensor_msgs/Image)
 
  Published Topics:
    /amh19/lane/debug_image   (sensor_msgs/Image)
@@ -44,9 +35,9 @@ DEFAULT_DEBUG_TOPIC    = '/amh19/lane/debug_image'
 DEFAULT_LINES_TOPIC    = '/amh19/lane/lines'
 DEFAULT_CENTROID_TOPIC = '/amh19/lane/centroid'
 
-CLR_LINE   = (0, 220, 255)    # Amarillo-cyan — la línea detectada
-CLR_CENTER = (0, 255, 255)    # Amarillo — centroide
-CLR_MEM    = (180, 180, 0)    # Amarillo apagado — memoria
+CLR_LINE   = (0, 220, 255)
+CLR_CENTER = (0, 255, 255)
+CLR_MEM    = (180, 180, 0)
 
 
 class LaneDetectionNode(Node):
@@ -54,45 +45,35 @@ class LaneDetectionNode(Node):
     def __init__(self):
         super().__init__('lane_detection_node')
 
-        # ── Topics ────────────────────────────────────────────────────
         self.declare_parameter('in_topic',       DEFAULT_IN_TOPIC)
         self.declare_parameter('debug_topic',    DEFAULT_DEBUG_TOPIC)
         self.declare_parameter('lines_topic',    DEFAULT_LINES_TOPIC)
         self.declare_parameter('centroid_topic', DEFAULT_CENTROID_TOPIC)
 
-        # ── ROI vertical ──────────────────────────────────────────────
         self.declare_parameter('roi_top',    0.45)
         self.declare_parameter('roi_bottom', 0.97)
 
-        # ── ROI horizontal (trapecio) ─────────────────────────────────
         self.declare_parameter('roi_bl', 0.02)
         self.declare_parameter('roi_br', 0.98)
         self.declare_parameter('roi_tl', 0.20)
         self.declare_parameter('roi_tr', 0.80)
 
-        # ── Sliding Window (una sola línea) ───────────────────────────
         self.declare_parameter('n_windows', 12)
-        self.declare_parameter('win_width', 40)   # más estrecho — una sola cinta
-        self.declare_parameter('min_pix',   20)   # menos píxeles — cinta delgada
+        self.declare_parameter('win_width', 40)
+        self.declare_parameter('min_pix',   20)
 
-        # ── CLAHE ─────────────────────────────────────────────────────
         self.declare_parameter('clahe_clip', 2.0)
         self.declare_parameter('clahe_grid',   8)
 
-        # ── Binarización HSV ──────────────────────────────────────────
         self.declare_parameter('hue_low',   15)
         self.declare_parameter('hue_high',  38)
         self.declare_parameter('sat_low',   40)
         self.declare_parameter('val_low',   60)
 
-        # ── Estabilidad ───────────────────────────────────────────────
         self.declare_parameter('max_age',      20)
         self.declare_parameter('smooth_alpha', 0.30)
-        # max_curv: la cinta amarilla sigue el carril, puede ser curva
-        # pero no hacer U-turns. ~0.003 para curvas cerradas de lab.
         self.declare_parameter('max_curv', 0.004)
 
-        # ── Debug ──────────────────────────────────────────────────────
         self.declare_parameter('publish_debug', True)
         self.declare_parameter('show_windows',  True)
 
@@ -122,12 +103,11 @@ class LaneDetectionNode(Node):
         self.publish_debug  = p('publish_debug')
         self.show_windows   = p('show_windows')
 
-        # ── Estado interno ─────────────────────────────────────────────
         self.bridge   = CvBridge()
         self.n_frames = 0
-        self._poly    = None    # poly de la línea central [a, b, c]
-        self._last    = None    # último poly válido (memoria)
-        self._age     = 0       # frames desde última detección
+        self._poly    = None
+        self._last    = None
+        self._age     = 0
         self._curv    = 0.0
         self._mode    = 'init'
 
@@ -142,7 +122,7 @@ class LaneDetectionNode(Node):
 
         g = self.get_logger().info
         g('=' * 62)
-        g(' LANE DETECTION NODE  [v6 — línea central única]')
+        g(' LANE DETECTION NODE (SIM)  [v6 — línea central única]')
         g('=' * 62)
         g(f'  CLAHE  clip={self.clahe_clip}  grid={self.clahe_grid}x{self.clahe_grid}')
         g(f'  HSV    H:[{self.hue_low},{self.hue_high}]  S>={self.sat_low}  V>={self.val_low}')
@@ -151,9 +131,6 @@ class LaneDetectionNode(Node):
         g(f'  max_curv={self.max_curv}  max_age={self.max_age}')
         g('=' * 62)
 
-    # ═══════════════════════════════════════════════════════════════════
-    #  CALLBACK
-    # ═══════════════════════════════════════════════════════════════════
     def cb(self, msg):
         try:
             frame = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
@@ -185,13 +162,9 @@ class LaneDetectionNode(Node):
             out.header = msg.header
             self.pub_debug.publish(out)
 
-    # ═══════════════════════════════════════════════════════════════════
-    #  BINARIZACIÓN — CLAHE + HSV AMARILLO
-    # ═══════════════════════════════════════════════════════════════════
     def _binarize(self, frame):
         h_img, w_img = frame.shape[:2]
 
-        # CLAHE en canal L para normalizar luz variable
         lab  = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)
         clahe   = cv2.createCLAHE(
@@ -201,43 +174,24 @@ class LaneDetectionNode(Node):
             cv2.merge([clahe.apply(l), a, b]),
             cv2.COLOR_LAB2BGR)
 
-        # Máscara HSV amarillo
         hsv   = cv2.cvtColor(frame_eq, cv2.COLOR_BGR2HSV)
         lower = np.array([self.hue_low,  self.sat_low, self.val_low], np.uint8)
         upper = np.array([self.hue_high, 255,          255],           np.uint8)
         mask  = cv2.inRange(hsv, lower, upper)
 
-        # ── Morphology: Open → Close ──────────────────────────────────
-        # OPEN (erode→dilate): elimina píxeles sueltos y adelgaza el blob
-        #   cuando hay sobreexposición y el amarillo se "infla".
-        # CLOSE (dilate→erode): rellena huecos internos de la cinta.
-        # El orden Open primero → Close después es clave para luz variable.
         k3 = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         k5 = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN,  k3)   # elimina ruido fino
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k5)   # rellena huecos
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN,  k3)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k5)
 
-        # ── Filtro por forma: la cinta es alargada, las cajas no ────────
-        # La cinta amarilla en perspectiva tiene aspect ratio alto (h > w).
-        # Objetos del fondo (cajas, señales) son cuadrados o anchos.
-        # Usamos connected components + filtro de aspect ratio para
-        # quedarnos solo con blobs que parecen una cinta de carretera.
-        #
-        # Criterios para ser "cinta válida":
-        #   1. Área mínima > 0.05% del frame
-        #   2. Área máxima < 15% del frame (si es muy grande es ruido de fondo)
-        #   3. Centroide Y en la mitad inferior (la cinta está en el piso)
-        #   4. Score = area / (w_bbox * h_bbox) → compacidad
-        #      La cinta es alargada → bbox grande, área moderada → score medio
-        #      Las cajas son sólidas → bbox ≈ área → score alto (descartadas si son muy grandes)
         n, lbls, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
 
         if n <= 1:
             return np.zeros_like(mask)
 
-        min_area  = max(50,  int(w_img * h_img * 0.0005))  # mínimo 0.05%
-        max_area  = int(w_img * h_img * 0.15)               # máximo 15%
-        mid_y     = h_img * 0.55                            # centroide debe estar abajo
+        min_area  = max(50,  int(w_img * h_img * 0.0005))
+        max_area  = int(w_img * h_img * 0.15)
+        mid_y     = h_img * 0.55
 
         best_lbl  = -1
         best_score = -1
@@ -247,25 +201,17 @@ class LaneDetectionNode(Node):
             if area < min_area or area > max_area:
                 continue
 
-            # Centroide del blob
             cy_blob = stats[lbl, cv2.CC_STAT_TOP] + stats[lbl, cv2.CC_STAT_HEIGHT] / 2
             if cy_blob < mid_y:
-                # Blob está en la mitad superior → probablemente objeto del fondo
                 continue
 
-            # Score = área real / área del bounding box
-            # Cinta: puntaje bajo-medio (tiene huecos, forma irregular)
-            # Caja sólida grande: puntaje alto Y grande → penalizar
             bw  = max(1, stats[lbl, cv2.CC_STAT_WIDTH])
             bh  = max(1, stats[lbl, cv2.CC_STAT_HEIGHT])
             fill_ratio = area / (bw * bh)
 
-            # Preferir blobs más grandes pero penalizar si son muy "llenos"
-            # (fill_ratio muy alto = caja sólida, no cinta)
             if fill_ratio > 0.85 and area > int(w_img * h_img * 0.03):
-                continue   # bloque sólido grande → descartado
+                continue
 
-            # Puntaje final: favorece área grande y centroide bajo
             score = area * (1.0 - cy_blob / h_img * 0.3)
             if score > best_score:
                 best_score = score
@@ -278,9 +224,6 @@ class LaneDetectionNode(Node):
         clean[lbls == best_lbl] = 255
         return clean
 
-    # ═══════════════════════════════════════════════════════════════════
-    #  ROI
-    # ═══════════════════════════════════════════════════════════════════
     def _build_roi(self, h, w):
         mask  = np.zeros((h, w), np.uint8)
         y_top = int(h * self.roi_top)
@@ -294,39 +237,23 @@ class LaneDetectionNode(Node):
         cv2.fillPoly(mask, pts, 255)
         return mask
 
-    # ═══════════════════════════════════════════════════════════════════
-    #  SLIDING WINDOW — UNA SOLA LÍNEA
-    # ═══════════════════════════════════════════════════════════════════
     def _sliding_window(self, binary, h, w):
-        """
-        Versión simplificada para una sola línea central:
-          1. Histograma → pico más alto = base de la cinta
-          2. N ventanas hacia arriba centradas en el pico
-          3. Recentra en mean(x) si count >= min_pix
-
-        Si tenemos un poly del frame anterior, usamos su valor en y_bottom
-        como punto de partida en lugar del histograma — más estable en curvas.
-        """
         y_b  = int(h * self.roi_bottom)
         y_t  = int(h * self.roi_top)
         span = max(1, y_b - y_t)
         xl   = int(w * self.roi_bl)
         xr   = int(w * self.roi_br)
 
-        # Histograma ponderado zona inferior
         z1   = binary[y_b - span//4 : y_b,           :]
         z2   = binary[y_b - span//2 : y_b - span//4, :]
         hist = (np.sum(z1, 0)*3 + np.sum(z2, 0)*2).astype(np.float32)
         hist[:xl] = 0; hist[xr:] = 0
 
-        # Base: pico del histograma O posición del poly anterior
         if self._poly is not None:
-            # Usa la posición predicha por el poly anterior en y_bottom
             base_x = int(np.clip(np.polyval(self._poly, y_b), xl, xr))
         else:
             base_x = int(np.argmax(hist)) if hist.max() > 0 else (xl+xr)//2
 
-        # Ventanas deslizantes
         curv  = self._curv
         aww   = self.win_width + int(min(curv * 30000, 25))
         win_h = max(1, span // self.n_windows)
@@ -355,9 +282,6 @@ class LaneDetectionNode(Node):
         pts = np.column_stack((nz_x[pts_idx], nz_y[pts_idx]))
         return pts, boxes, base_x
 
-    # ═══════════════════════════════════════════════════════════════════
-    #  POLYFIT — UNA LÍNEA
-    # ═══════════════════════════════════════════════════════════════════
     def _fit_poly(self, pts):
         if len(pts) < 3:
             return None
@@ -375,9 +299,6 @@ class LaneDetectionNode(Node):
         except Exception:
             return None
 
-    # ═══════════════════════════════════════════════════════════════════
-    #  SMOOTH + MEMORIA
-    # ═══════════════════════════════════════════════════════════════════
     def _smooth(self, poly):
         if poly is not None:
             self._poly = poly if self._poly is None else \
@@ -389,32 +310,13 @@ class LaneDetectionNode(Node):
             self._poly = self._last if self._age <= self.max_age else None
         return self._poly
 
-    # ═══════════════════════════════════════════════════════════════════
-    #  CENTROIDE = POSICIÓN DE LA LÍNEA EN LA BASE DEL ROI
-    # ═══════════════════════════════════════════════════════════════════
     def _centroid(self, poly, h, w):
-        """
-        Para una línea central única:
-          cx = posición X de la línea en y = roi_bottom
-          cy = roi_bottom (fila de referencia)
-          error = cx - w//2  (positivo = línea a la derecha del centro)
-
-        El controlador downstream debe intentar mantener error ≈ 0.
-        """
         y  = int(h * self.roi_bottom)
         cx = int(np.clip(np.polyval(poly, y), 0, w-1)) \
              if poly is not None else w // 2
         return cx, y
 
-    # ═══════════════════════════════════════════════════════════════════
-    #  PUBLISHERS
-    # ═══════════════════════════════════════════════════════════════════
     def _pub_lines(self, poly):
-        """
-        Publica coeficientes [a, b, c] de la línea central.
-        Missing = [-1, -1, -1]
-        Downstream: x_linea = np.polyval([a,b,c], y_pixel)
-        """
         msg = Float32MultiArray()
         msg.data = list(poly.astype(float)) if poly is not None \
                    else [-1., -1., -1.]
@@ -425,29 +327,22 @@ class LaneDetectionNode(Node):
         msg.x, msg.y, msg.z = float(cx), float(cy), 0.
         self.pub_centroid.publish(msg)
 
-    # ═══════════════════════════════════════════════════════════════════
-    #  DEBUG
-    # ═══════════════════════════════════════════════════════════════════
     def _draw(self, frame, binary, roi_mask, win_boxes,
               pts, poly, cx, cy, base_x, h, w):
         dbg = frame.copy()
 
-        # ROI overlay tenue
         roi_ov = np.zeros_like(frame)
         roi_ov[roi_mask == 255] = [10, 15, 0]
         cv2.addWeighted(roi_ov, 0.35, dbg, 1.0, 0, dbg)
 
-        # Píxeles de la cinta detectados
         for (px, py) in pts:
             if 0 <= px < w and 0 <= py < h:
                 cv2.circle(dbg, (px, py), 1, CLR_LINE, -1)
 
-        # Ventanas SW (una sola columna)
         if self.show_windows:
             for (p1, p2) in win_boxes:
                 cv2.rectangle(dbg, p1, p2, (0, 180, 180), 1)
 
-        # Curva polinomial de la línea
         y_range = np.linspace(int(h*self.roi_top),
                               int(h*self.roi_bottom), 100).astype(int)
         if poly is not None:
@@ -458,19 +353,15 @@ class LaneDetectionNode(Node):
                 clr = CLR_LINE if self._age == 0 else CLR_MEM
                 cv2.polylines(dbg, [pts_draw], False, clr, 4, cv2.LINE_AA)
 
-        # Línea central del frame (referencia)
         for y in range(0, h, 20):
             cv2.line(dbg, (w//2, y), (w//2, min(y+10,h)), (120,120,120), 1)
 
-        # Punto de la línea en y_bottom + flecha de error
         cv2.circle(dbg, (cx, cy), 10, CLR_CENTER, -1)
         cv2.circle(dbg, (cx, cy), 14, CLR_CENTER, 2)
         cv2.arrowedLine(dbg, (w//2, cy), (cx, cy), CLR_CENTER, 2, tipLength=0.25)
 
-        # Punto de base (histograma)
         cv2.circle(dbg, (base_x, cy - 10), 5, (255, 100, 0), -1)
 
-        # Inset binario (verde = detectado)
         ih, iw = h//4, w//4
         inset  = cv2.resize(cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR), (iw, ih))
         inset[inset[:,:,0] > 0] = [0, 200, 0]
@@ -479,7 +370,6 @@ class LaneDetectionNode(Node):
         cv2.putText(dbg, 'Binary', (w-iw+4, 14),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150,150,150), 1)
 
-        # HUD
         err  = cx - w//2
         curv = self._curv
         st   = 'OK' if self._age == 0 else \
@@ -489,14 +379,14 @@ class LaneDetectionNode(Node):
         mode_clr = (100,200,255) if self._mode == 'curve' else (150,255,150)
         self._mode = 'curve' if curv > 0.0003 else 'straight'
 
-        cv2.rectangle(dbg, (0,0), (300, 88), (0,0,0), -1)
+        cv2.rectangle(dbg, (0,0), (310, 96), (0,0,0), -1)
         cv2.putText(dbg, f'LINE  : {st}',             (8,20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, clr_st, 1)
         cv2.putText(dbg, f'CX={cx}px  ERR={err:+d}px', (8,42),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, CLR_CENTER, 1)
         cv2.putText(dbg, f'CURV={curv:.5f}  [{self._mode}]', (8,62),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, mode_clr, 1)
-        cv2.putText(dbg, f'Frame #{self.n_frames}  [SW+Poly2 v6]', (8,80),
+        cv2.putText(dbg, f'Frame #{self.n_frames}  [SIM SW+Poly2 v6]', (8,82),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.38, (110,110,110), 1)
 
         return dbg

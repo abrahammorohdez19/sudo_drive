@@ -30,10 +30,20 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            # ── Hardware (QCar real) ──────────────────────────────────────
             'undistorted_node = qcar_navigation.undistorted_node:main',
             'lane_visualizer_node = qcar_navigation.lane_visualizer_node:main',
-            'lane_detection_sw_node = qcar_navigation.lane_detection_sw_node:main'
-
+            'lane_detection_sw_node = qcar_navigation.lane_detection_sw_node:main',
+            'pure_pursuit_vision_node = qcar_navigation.pure_pursuit_vision_node:main',
+            'lidar_kalman_node_amh19 = qcar_navigation.lidar_kalman_node_amh19:main',
+            'qcar_lidar_alert_2 = qcar_navigation.qcar_lidar_alert_2:main',
+            # ── Simulación (/qcar_sim/*) ──────────────────────────────────
+            'undistorted_node_sim = qcar_navigation.undistorted_node_sim:main',
+            'lane_detection_sw_node_sim = qcar_navigation.lane_detection_sw_node_sim:main',
+            'lane_visualizer_node_sim = qcar_navigation.lane_visualizer_node_sim:main',
+            'pure_pursuit_vision_node_sim = qcar_navigation.pure_pursuit_vision_node_sim:main',
+            'lidar_kalman_node_amh19_sim = qcar_navigation.lidar_kalman_node_amh19_sim:main',
+            'qcar_lidar_alert_2_sim = qcar_navigation.qcar_lidar_alert_2_sim:main',
         ],
     },
 )
