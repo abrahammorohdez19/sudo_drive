@@ -57,6 +57,7 @@ class PurePursuitVisionNode(Node):
 
         self.declare_parameter('roi_bottom',      0.97)
         self.declare_parameter('lookahead_rows',  80)
+        self.declare_parameter('lateral_offset_px', 180.0)
 
         # Topics — apuntando a la simulación
         self.declare_parameter('lines_topic',    '/amh19/lane/lines')
@@ -75,6 +76,7 @@ class PurePursuitVisionNode(Node):
         self.img_h          = p('img_height')
         self.roi_bottom     = p('roi_bottom')
         self.lookahead_rows = p('lookahead_rows')
+        self.lateral_offset_px = p('lateral_offset_px')
 
         lines_topic    = p('lines_topic')
         centroid_topic = p('centroid_topic')
@@ -168,7 +170,7 @@ class PurePursuitVisionNode(Node):
         self.pub.publish(cmd)
 
         t       = (now.nanoseconds - self.start_time.nanoseconds) * 1e-9
-        err_px  = self.cx - self.img_w / 2.0
+        err_px  = self.cx - (self.img_w / 2.0 - self.lateral_offset_px)
         self.log_t.append(t)
         self.log_steer.append(math.degrees(steer_cmd))
         self.log_err.append(err_px)
@@ -185,7 +187,7 @@ class PurePursuitVisionNode(Node):
         y_look = max(0, y_ref - self.lookahead_rows)
 
         x_look = float(np.polyval(self.poly, y_look))
-        dx     = x_look - self.img_w / 2.0
+        dx     = x_look - self.img_w / 2.0 + self.lateral_offset_px
 
         alpha  = math.atan2(dx, float(self.lookahead_rows))
         Lf     = max(self.k_gain * abs(self.v_ref) + self.Lfc, 1e-3)

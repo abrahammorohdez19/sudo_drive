@@ -13,3 +13,6 @@ __pycache__/
 # Otros
 .DS_Store
 resultados/
+build/
+install/
+log/
