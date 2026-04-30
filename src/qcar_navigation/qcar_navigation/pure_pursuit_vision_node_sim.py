@@ -84,8 +84,11 @@ class PurePursuitVisionNode(Node):
         cmd_topic      = p('cmd_topic')
         alert_topic    = p('alert_topic')
 
-        self.poly   = None
-        self.cx     = None
+        self.poly           = None
+        self.cx             = None
+        self.last_steer_cmd = 0.0
+        self.lost_frames    = 0
+        self.max_lost_frames = 30  # frames (~600 ms a 50 Hz)
         self.v_enc  = 0.0
         self.paro   = False
         self.n_frames = 0
@@ -153,13 +156,26 @@ class PurePursuitVisionNode(Node):
             return
 
         if self.poly is None or self.cx is None:
-            self.stop_qcar()
+            self.lost_frames += 1
+            if self.lost_frames <= self.max_lost_frames:
+                steer_cmd = self.last_steer_cmd
+                cmd = Vector3Stamped()
+                cmd.header.stamp    = now.to_msg()
+                cmd.header.frame_id = 'base_link'
+                cmd.vector.x        = float(self.v_ref)
+                cmd.vector.y        = float(-steer_cmd)
+                cmd.vector.z        = 0.0
+                self.pub.publish(cmd)
+            else:
+                self.stop_qcar()
             return
 
+        self.lost_frames = 0
         self.n_frames += 1
 
-        delta     = self.compute_pure_pursuit_delta()
+        delta     = self.compute_pure_pursuit_delta(self.poly)
         steer_cmd = float(np.clip(delta, -self.max_steer_cmd, self.max_steer_cmd))
+        self.last_steer_cmd = steer_cmd
 
         cmd = Vector3Stamped()
         cmd.header.stamp    = now.to_msg()
@@ -170,7 +186,10 @@ class PurePursuitVisionNode(Node):
         self.pub.publish(cmd)
 
         t       = (now.nanoseconds - self.start_time.nanoseconds) * 1e-9
-        err_px  = self.cx - (self.img_w / 2.0 - self.lateral_offset_px)
+        y_ref   = int(self.img_h * self.roi_bottom)
+        y_look  = max(0, y_ref - self.lookahead_rows)
+        x_look  = float(np.polyval(self.poly, y_look))
+        err_px  = x_look - self.img_w / 2.0 + self.lateral_offset_px
         self.log_t.append(t)
         self.log_steer.append(math.degrees(steer_cmd))
         self.log_err.append(err_px)
@@ -182,11 +201,11 @@ class PurePursuitVisionNode(Node):
                 f'cx={self.cx:.0f}px  err={err_px:+.0f}px  '
                 f'delta={math.degrees(delta):+.1f}°  v={self.v_ref:.3f} m/s')
 
-    def compute_pure_pursuit_delta(self):
+    def compute_pure_pursuit_delta(self, poly):
         y_ref  = int(self.img_h * self.roi_bottom)
         y_look = max(0, y_ref - self.lookahead_rows)
 
-        x_look = float(np.polyval(self.poly, y_look))
+        x_look = float(np.polyval(poly, y_look))
         dx     = x_look - self.img_w / 2.0 + self.lateral_offset_px
 
         alpha  = math.atan2(dx, float(self.lookahead_rows))

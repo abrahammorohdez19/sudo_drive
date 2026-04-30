@@ -34,6 +34,7 @@
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy
 from geometry_msgs.msg import Vector3Stamped, Point
 from std_msgs.msg import Bool, Float32MultiArray
 
@@ -59,9 +60,17 @@ class PurePursuitVisionNode(Node):
         # ── Parámetros ────────────────────────────────────────────────
         self.declare_parameter('lookahead',       0.20)   # Lfc — gain empírico (metros)
         self.declare_parameter('k_gain',          0.50)   # Lf = k*v + Lfc
-        self.declare_parameter('v_ref',           0.05)   # velocidad constante (m/s)
+        self.declare_parameter('v_ref',           0.045)   # velocidad constante (m/s)
         self.declare_parameter('wheelbase',       0.256)  # distancia entre ejes (m)
         self.declare_parameter('max_steer',       0.50)   # límite steering (rad)
+        self.declare_parameter('max_steer_rate',  0.02)   # rad/ciclo — rate limiter
+        self.declare_parameter('steer_alpha',     0.30)   # EMA: 0=sin cambio, 1=sin filtro
+        self.declare_parameter('steer_gain',       15.0)   # ganancia pura pursuit en px (sube para curvas)
+        self.declare_parameter('warmup_frames',    30)    # frames iniciales en espera (detector estabilice)
+        self.declare_parameter('xlook_tol_px',   200.0)  # máx diferencia x_look vs centroide (geom válida)
+        self.declare_parameter('startup_cap_frames', 60) # frames post-warmup con steer limitado
+        self.declare_parameter('startup_max_steer', 0.20) # rad — cap durante startup_cap_frames
+        self.declare_parameter('k_curv_offset',   4000.0) # px extra por unidad de curvatura en curvas
 
         # Imagen — deben coincidir con la resolución real de la cámara
         self.declare_parameter('img_width',       640)
@@ -70,6 +79,7 @@ class PurePursuitVisionNode(Node):
         # ROI — debe coincidir con lane_detection_sw_node
         self.declare_parameter('roi_bottom',      0.97)
         self.declare_parameter('lookahead_rows',  80)     # filas hacia arriba para el punto objetivo
+        self.declare_parameter('lateral_offset_px', 180.0)
 
         # Topics
         self.declare_parameter('lines_topic',    '/amh19/lane/lines')
@@ -84,10 +94,19 @@ class PurePursuitVisionNode(Node):
         self.v_ref          = p('v_ref')
         self.L              = p('wheelbase')
         self.max_steer_cmd  = p('max_steer')
+        self.max_steer_rate = p('max_steer_rate')
+        self.steer_alpha    = p('steer_alpha')
+        self.steer_gain          = p('steer_gain')
+        self.warmup_frames       = p('warmup_frames')
+        self.xlook_tol_px        = p('xlook_tol_px')
+        self.startup_cap_frames  = p('startup_cap_frames')
+        self.startup_max_steer   = p('startup_max_steer')
+        self.k_curv_offset       = p('k_curv_offset')
         self.img_w          = p('img_width')
         self.img_h          = p('img_height')
-        self.roi_bottom     = p('roi_bottom')
-        self.lookahead_rows = p('lookahead_rows')
+        self.roi_bottom        = p('roi_bottom')
+        self.lookahead_rows    = p('lookahead_rows')
+        self.lateral_offset_px = p('lateral_offset_px')
 
         lines_topic    = p('lines_topic')
         centroid_topic = p('centroid_topic')
@@ -96,11 +115,16 @@ class PurePursuitVisionNode(Node):
         alert_topic    = p('alert_topic')
 
         # ── Estado interno ─────────────────────────────────────────────
-        self.poly   = None   # [a, b, c] del polinomio de la línea
-        self.cx     = None   # posición X de la línea en imagen (px)
-        self.v_enc  = 0.0    # velocidad leída del encoder
-        self.paro   = False
-        self.n_frames = 0
+        self.poly      = None
+        self.last_poly = None
+        self.poly_age  = 0
+        self.max_poly_age = 30  # frames (~600 ms a 50 Hz)
+        self.cx      = None
+        self.last_cx = None
+        self.v_enc       = 0.0
+        self.paro        = False
+        self.n_frames    = 0
+        self.prev_steer  = 0.0   # último steering enviado (rate limiter + EMA)
 
         self.log_t      = []
         self.log_steer  = []
@@ -108,18 +132,20 @@ class PurePursuitVisionNode(Node):
         self.log_v      = []
         self.start_time = self.get_clock().now()
 
+        qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE)
+
         # ── Subscripciones ─────────────────────────────────────────────
         self.lines_sub = self.create_subscription(
-            Float32MultiArray, lines_topic, self.lines_callback, 10)
+            Float32MultiArray, lines_topic, self.lines_callback, qos)
         self.centroid_sub = self.create_subscription(
-            Point, centroid_topic, self.centroid_callback, 10)
+            Point, centroid_topic, self.centroid_callback, qos)
         self.encoder_sub = self.create_subscription(
-            Vector3Stamped, encoder_topic, self.encoder_callback, 10)
+            Vector3Stamped, encoder_topic, self.encoder_callback, qos)
         self.paro_sub = self.create_subscription(
-            Bool, alert_topic, self.paro_callback, 10)
+            Bool, alert_topic, self.paro_callback, qos)
 
         # ── Publicador ─────────────────────────────────────────────────
-        self.pub = self.create_publisher(Vector3Stamped, cmd_topic, 10)
+        self.pub = self.create_publisher(Vector3Stamped, cmd_topic, qos)
 
         # ── Timer de control a 50 Hz ───────────────────────────────────
         self.timer = self.create_timer(0.02, self.control_loop)
@@ -130,6 +156,7 @@ class PurePursuitVisionNode(Node):
         g('=' * 62)
         g(f'  v_ref={self.v_ref} m/s   wheelbase={self.L} m')
         g(f'  Lfc={self.Lfc}  k_gain={self.k_gain}  max_steer=±{self.max_steer_cmd} rad')
+        g(f'  max_steer_rate={self.max_steer_rate} rad/ciclo  steer_alpha={self.steer_alpha}')
         g(f'  lookahead_rows={self.lookahead_rows}  roi_bottom={self.roi_bottom}')
         g(f'  Imagen: {self.img_w}x{self.img_h}')
         g('=' * 62)
@@ -141,12 +168,15 @@ class PurePursuitVisionNode(Node):
     def lines_callback(self, msg: Float32MultiArray):
         data = msg.data
         if len(data) == 3 and not all(v == -1.0 for v in data):
-            self.poly = np.array(data, dtype=float)
+            self.poly      = np.array(data, dtype=float)
+            self.last_poly = self.poly.copy()
+            self.poly_age  = 0
         else:
             self.poly = None
 
     def centroid_callback(self, msg: Point):
-        self.cx = float(msg.x)
+        self.cx      = float(msg.x)
+        self.last_cx = self.cx
 
     def encoder_callback(self, msg: Vector3Stamped):
         self.v_enc = float(msg.vector.x)
@@ -171,14 +201,47 @@ class PurePursuitVisionNode(Node):
             self.stop_qcar()
             return
 
-        if self.poly is None or self.cx is None:
+        # Warmup: esperar que el detector de línea estabilice antes de moverse
+        self.n_frames += 1
+        if self.n_frames <= self.warmup_frames:
+            self.stop_qcar()
+            if self.n_frames == self.warmup_frames:
+                self.get_logger().info(f'Warmup completado ({self.warmup_frames} frames). Iniciando control.')
+            return
+
+        current_poly = self.poly
+        if current_poly is None:
+            self.poly_age += 1
+            if self.last_poly is not None and self.poly_age <= self.max_poly_age:
+                current_poly = self.last_poly
+            else:
+                self.stop_qcar()
+                return
+        else:
+            self.poly_age = 0
+
+        current_cx = self.cx if self.cx is not None else self.last_cx
+        if current_cx is None:
             self.stop_qcar()
             return
 
-        self.n_frames += 1
+        delta, x_look_used = self.compute_pure_pursuit_delta(current_poly, current_cx)
+        delta = float(np.clip(delta, -self.max_steer_cmd, self.max_steer_cmd))
 
-        delta     = self.compute_pure_pursuit_delta()
-        steer_cmd = float(np.clip(delta, -self.max_steer_cmd, self.max_steer_cmd))
+        # EMA low-pass filter
+        delta = self.steer_alpha * delta + (1.0 - self.steer_alpha) * self.prev_steer
+
+        # rate limiter
+        change = float(np.clip(delta - self.prev_steer,
+                               -self.max_steer_rate, self.max_steer_rate))
+        steer_cmd = self.prev_steer + change
+        self.prev_steer = steer_cmd
+
+        # cap de steering durante los primeros frames post-warmup
+        frames_since_warmup = self.n_frames - self.warmup_frames
+        if frames_since_warmup <= self.startup_cap_frames:
+            cap = self.startup_max_steer
+            steer_cmd = float(np.clip(steer_cmd, -cap, cap))
 
         cmd = Vector3Stamped()
         cmd.header.stamp     = now.to_msg()
@@ -188,8 +251,8 @@ class PurePursuitVisionNode(Node):
         cmd.vector.z         = 0.0
         self.pub.publish(cmd)
 
-        t       = (now.nanoseconds - self.start_time.nanoseconds) * 1e-9
-        err_px  = self.cx - self.img_w / 2.0
+        t      = (now.nanoseconds - self.start_time.nanoseconds) * 1e-9
+        err_px = x_look_used - self.img_w / 2.0 + self.lateral_offset_px
         self.log_t.append(t)
         self.log_steer.append(math.degrees(steer_cmd))
         self.log_err.append(err_px)
@@ -198,41 +261,45 @@ class PurePursuitVisionNode(Node):
         if self.n_frames % 50 == 0:
             self.get_logger().info(
                 f'[Frame {self.n_frames}]  '
-                f'cx={self.cx:.0f}px  err={err_px:+.0f}px  '
+                f'cx={current_cx:.0f}px  err={err_px:+.0f}px  '
                 f'delta={math.degrees(delta):+.1f}°  v={self.v_ref:.3f} m/s')
 
     # ═══════════════════════════════════════════════════════════════════
     #  PURE PURSUIT — ESPACIO IMAGEN
     # ═══════════════════════════════════════════════════════════════════
 
-    def compute_pure_pursuit_delta(self):
-        """
-        Pure Pursuit en imagen:
-          - y_ref   = fila inferior del ROI  (≈ posición del QCar)
-          - y_look  = y_ref - lookahead_rows (punto objetivo adelante)
-          - x_look  = polyval(poly, y_look)  (dónde está la línea ahí)
-          - dx      = x_look - img_w/2       (desplazamiento lateral)
-          - alpha   = atan2(dx, lookahead_rows)
-          - Lf      = k_gain * v + Lfc       (lookahead dinámico)
-          - delta   = atan2(2*L*sin(alpha), Lf)
-        """
+    def compute_pure_pursuit_delta(self, poly, cx: float):
         y_ref  = int(self.img_h * self.roi_bottom)
         y_look = max(0, y_ref - self.lookahead_rows)
 
-        x_look = float(np.polyval(self.poly, y_look))
-        dx     = x_look - self.img_w / 2.0
+        x_look = float(np.polyval(poly, y_look))
 
-        alpha  = math.atan2(dx, float(self.lookahead_rows))
+        # Bounds duro: fuera de la imagen siempre es polinomio inválido
+        if not (0.0 <= x_look <= float(self.img_w)):
+            x_look = cx
+        # Fallback al centroide si la extrapolación diverge demasiado
+        elif abs(x_look - cx) > self.xlook_tol_px:
+            x_look = cx
 
-        Lf     = max(self.k_gain * abs(self.v_ref) + self.Lfc, 1e-3)
-        delta  = math.atan2(2.0 * self.L * math.sin(alpha), Lf)
-        return delta
+        # offset adaptivo: en curvas el carro se aleja más de la línea
+        # para mantener la línea visible en el campo de visión
+        curv_offset = self.k_curv_offset * abs(float(poly[0]))
+        effective_offset = self.lateral_offset_px + curv_offset
+
+        dx    = x_look - self.img_w / 2.0 + effective_offset
+        alpha = math.atan2(dx, float(self.lookahead_rows))
+
+        # Fórmula en espacio píxel: steer_gain reemplaza 2*L/Lf (todas unidades px)
+        delta = math.atan2(2.0 * self.steer_gain * math.sin(alpha),
+                           float(self.lookahead_rows))
+        return delta, x_look
 
     # ═══════════════════════════════════════════════════════════════════
     #  STOP
     # ═══════════════════════════════════════════════════════════════════
 
     def stop_qcar(self):
+        self.prev_steer = 0.0
         cmd = Vector3Stamped()
         cmd.header.stamp    = self.get_clock().now().to_msg()
         cmd.header.frame_id = 'base_link'
