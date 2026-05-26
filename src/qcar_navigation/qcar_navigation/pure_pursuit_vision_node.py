@@ -63,14 +63,15 @@ class PurePursuitVisionNode(Node):
         self.declare_parameter('v_ref',           0.045)   # velocidad constante (m/s)
         self.declare_parameter('wheelbase',       0.256)  # distancia entre ejes (m)
         self.declare_parameter('max_steer',       0.50)   # límite steering (rad)
-        self.declare_parameter('max_steer_rate',  0.02)   # rad/ciclo — rate limiter
-        self.declare_parameter('steer_alpha',     0.30)   # EMA: 0=sin cambio, 1=sin filtro
+        self.declare_parameter('max_steer_rate',  0.15)   # rad/ciclo — rate limiter (was 0.02 — too slow for curves)
+        self.declare_parameter('steer_alpha',     0.70)   # EMA: 0=sin cambio, 1=sin filtro (was 0.30 — too laggy)
         self.declare_parameter('steer_gain',       15.0)   # ganancia pura pursuit en px (sube para curvas)
         self.declare_parameter('warmup_frames',    30)    # frames iniciales en espera (detector estabilice)
         self.declare_parameter('xlook_tol_px',   200.0)  # máx diferencia x_look vs centroide (geom válida)
-        self.declare_parameter('startup_cap_frames', 60) # frames post-warmup con steer limitado
+        self.declare_parameter('startup_cap_frames',  0) # frames post-warmup con steer limitado (0 = desactivado)
         self.declare_parameter('startup_max_steer', 0.20) # rad — cap durante startup_cap_frames
         self.declare_parameter('k_curv_offset',   4000.0) # px extra por unidad de curvatura en curvas
+        self.declare_parameter('max_poly_age',     60)   # frames usando último polinomio antes de parar
 
         # Imagen — deben coincidir con la resolución real de la cámara
         self.declare_parameter('img_width',       640)
@@ -102,6 +103,7 @@ class PurePursuitVisionNode(Node):
         self.startup_cap_frames  = p('startup_cap_frames')
         self.startup_max_steer   = p('startup_max_steer')
         self.k_curv_offset       = p('k_curv_offset')
+        self.max_poly_age        = p('max_poly_age')
         self.img_w          = p('img_width')
         self.img_h          = p('img_height')
         self.roi_bottom        = p('roi_bottom')
@@ -118,7 +120,6 @@ class PurePursuitVisionNode(Node):
         self.poly      = None
         self.last_poly = None
         self.poly_age  = 0
-        self.max_poly_age = 30  # frames (~600 ms a 50 Hz)
         self.cx      = None
         self.last_cx = None
         self.v_enc       = 0.0
@@ -282,8 +283,8 @@ class PurePursuitVisionNode(Node):
             x_look = cx
 
         # offset adaptivo: en curvas el carro se aleja más de la línea
-        # para mantener la línea visible en el campo de visión
-        curv_offset = self.k_curv_offset * abs(float(poly[0]))
+        # para mantener la línea visible en el campo de visión (cap: 100px extra)
+        curv_offset = min(self.k_curv_offset * abs(float(poly[0])), 100.0)
         effective_offset = self.lateral_offset_px + curv_offset
 
         dx    = x_look - self.img_w / 2.0 + effective_offset
@@ -406,25 +407,36 @@ class PurePursuitVisionNode(Node):
 # ═══════════════════════════════════════════════════════════════════════
 
 def main(args=None):
+    import time
+
     rclpy.init(args=args)
     node = PurePursuitVisionNode()
 
-    # Interceptamos SIGINT ANTES de que rclpy invalide el contexto,
-    # así el publish de stop llega al QCar.
+    def _send_stop():
+        for _ in range(5):
+            node.stop_qcar()
+        time.sleep(0.15)
+
     _rclpy_handler = signal.getsignal(signal.SIGINT)
 
     def _sigint_handler(signum, frame):
-        node.stop_qcar()
+        _send_stop()
         if callable(_rclpy_handler):
             _rclpy_handler(signum, frame)
 
-    signal.signal(signal.SIGINT, _sigint_handler)
+    def _sigterm_handler(_signum, _frame):
+        _send_stop()
+        rclpy.shutdown()
+
+    signal.signal(signal.SIGINT,  _sigint_handler)
+    signal.signal(signal.SIGTERM, _sigterm_handler)
 
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
     finally:
+        _send_stop()
         node.plot_results()
         node.destroy_node()
         rclpy.shutdown()

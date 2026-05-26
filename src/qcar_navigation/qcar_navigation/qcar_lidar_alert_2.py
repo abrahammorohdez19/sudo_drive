@@ -13,10 +13,18 @@
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Bool
 from geometry_msgs.msg import Vector3Stamped
 import numpy as np
+
+_QOS_BEST_EFFORT = QoSProfile(
+    reliability=ReliabilityPolicy.BEST_EFFORT,
+    history=HistoryPolicy.KEEP_LAST,
+    depth=10,
+    durability=DurabilityPolicy.VOLATILE,
+)
 
 
 class ObstacleDetector(Node):
@@ -28,10 +36,10 @@ class ObstacleDetector(Node):
         # ----------------------------------------------------------
         # Parameters
         # ----------------------------------------------------------
-        self.distance_threshold = 0.35  # meters
+        self.distance_threshold = 0.55  # meters — más margen para frenar a tiempo
 
-        self.angle_range_low = 22.5     # deg  (velocity <= 1 m/s)
-        self.angle_range_high = 30.0    # deg  (velocity > 1 m/s)
+        self.angle_range_low = 35.0     # deg  (velocity <= 1 m/s) — cono más amplio
+        self.angle_range_high = 40.0    # deg  (velocity > 1 m/s)
         self.velocity_threshold = 1.0   # m/s
 
         self.angle_range = self.angle_range_low
@@ -40,7 +48,7 @@ class ObstacleDetector(Node):
         # LiDAR mounting offset (QCar LiDAR faces 270° / 4.71 rad)
         self.front_angle_offset = 4.71
 
-        self.debug_mode = True
+        self.debug_mode = False  # True = spam cada velocity update
 
         # ----------------------------------------------------------
         # Publishers
@@ -51,7 +59,7 @@ class ObstacleDetector(Node):
         # Subscribers
         # ----------------------------------------------------------
         self.lidar_sub = self.create_subscription(
-            LaserScan, '/qcar/scan', self.lidar_callback, 10)
+            LaserScan, '/qcar/scan', self.lidar_callback, _QOS_BEST_EFFORT)
 
         self.velocity_sub = self.create_subscription(
             Vector3Stamped, '/qcar/velocity', self.velocity_callback, 10)

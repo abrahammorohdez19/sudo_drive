@@ -44,6 +44,16 @@ setup(
             'pure_pursuit_vision_node_sim = qcar_navigation.pure_pursuit_vision_node_sim:main',
             'lidar_kalman_node_amh19_sim = qcar_navigation.lidar_kalman_node_amh19_sim:main',
             'qcar_lidar_alert_2_sim = qcar_navigation.qcar_lidar_alert_2_sim:main',
+            # ── Odometría IMU (BNO055) ────────────────────────────────────
+            'imu_external = qcar_navigation.imu_external:main',
+            'pose_ekf_qcar_2 = qcar_navigation.pose_ekf_qcar_2:main',
+            'pose_final_qcar = qcar_navigation.pose_final_qcar:main',
+            # ── Trayectoria grabada + mux ─────────────────────────────────
+            'trayectoria_grabar_csv = qcar_navigation.trayectoria_grabar_csv_node:main',
+            'qcar_pure_pursuit = qcar_navigation.qcar_pure_pursuit:main',
+            'cmd_mux_node = qcar_navigation.cmd_mux_node:main',
+            'pose_monitor_node = qcar_navigation.pose_monitor_node:main',
+            'lidar_loc_node = qcar_navigation.lidar_loc_node:main',
         ],
     },
 )
