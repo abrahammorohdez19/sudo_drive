@@ -36,10 +36,10 @@ class ObstacleDetector(Node):
         # ----------------------------------------------------------
         # Parameters
         # ----------------------------------------------------------
-        self.distance_threshold = 0.55  # meters — más margen para frenar a tiempo
+        self.distance_threshold = 0.38  # meters
 
-        self.angle_range_low = 35.0     # deg  (velocity <= 1 m/s) — cono más amplio
-        self.angle_range_high = 40.0    # deg  (velocity > 1 m/s)
+        self.angle_range_low = 18.0     # deg  (velocity <= 1 m/s) — solo frontal
+        self.angle_range_high = 22.0    # deg  (velocity > 1 m/s)
         self.velocity_threshold = 1.0   # m/s
 
         self.angle_range = self.angle_range_low

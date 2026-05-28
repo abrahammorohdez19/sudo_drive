@@ -54,6 +54,7 @@ setup(
             'cmd_mux_node = qcar_navigation.cmd_mux_node:main',
             'pose_monitor_node = qcar_navigation.pose_monitor_node:main',
             'lidar_loc_node = qcar_navigation.lidar_loc_node:main',
+            'lidar_map_overlay_node = qcar_navigation.lidar_map_overlay_node:main',
         ],
     },
 )

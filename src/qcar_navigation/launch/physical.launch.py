@@ -13,7 +13,7 @@ def generate_launch_description():
     Uso:
         ros2 launch qcar_navigation physical.launch.py
         ros2 launch qcar_navigation physical.launch.py show_map:=true
-        ros2 launch qcar_navigation physical.launch.py show_map:=true path_csv:=/ruta/waypoints.csv
+        ros2 launch qcar_navigation physical.launch.py lidar_map:=true
     """
     return LaunchDescription([
 
@@ -26,6 +26,11 @@ def generate_launch_description():
             'path_csv',
             default_value='',
             description='CSV de referencia para superponer en el mapa (opcional).'
+        ),
+        DeclareLaunchArgument(
+            'lidar_map',
+            default_value='false',
+            description='Lanzar visualizador LiDAR cartesiano.'
         ),
 
         # ── Visión ───────────────────────────────────────────────────
@@ -51,12 +56,6 @@ def generate_launch_description():
         # ── LiDAR / obstáculos ───────────────────────────────────────
         Node(
             package='qcar_navigation',
-            executable='lidar_kalman_node_amh19',
-            name='lidar_listener_node',
-            output='screen',
-        ),
-        Node(
-            package='qcar_navigation',
             executable='qcar_lidar_alert_2',
             name='obstacle_detector',
             output='screen',
@@ -70,7 +69,7 @@ def generate_launch_description():
             output='screen',
         ),
 
-        # ── Mapa en tiempo real (opcional, requiere display) ─────────
+        # ── Mapa de trayectoria (opcional) ───────────────────────────
         Node(
             package='qcar_navigation',
             executable='pose_monitor_node',
@@ -80,5 +79,14 @@ def generate_launch_description():
             parameters=[{
                 'path_csv': LaunchConfiguration('path_csv'),
             }],
+        ),
+
+        # ── Visualizador LiDAR cartesiano (opcional) ─────────────────
+        Node(
+            package='qcar_navigation',
+            executable='lidar_map_overlay_node',
+            name='lidar_map_overlay',
+            output='screen',
+            condition=IfCondition(LaunchConfiguration('lidar_map')),
         ),
     ])
