@@ -19,7 +19,7 @@ def generate_launch_description():
 
         DeclareLaunchArgument(
             'show_map',
-            default_value='false',
+            default_value='true',
             description='Lanzar ventana matplotlib con trayectoria en tiempo real.'
         ),
         DeclareLaunchArgument(
@@ -29,7 +29,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'lidar_map',
-            default_value='false',
+            default_value='true',
             description='Lanzar visualizador LiDAR cartesiano.'
         ),
 
