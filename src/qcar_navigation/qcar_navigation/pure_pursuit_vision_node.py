@@ -190,8 +190,15 @@ class PurePursuitVisionNode(Node):
             self.poly_age += 1
             if self.last_poly is not None and self.poly_age <= self.max_poly_age:
                 current_poly = self.last_poly
+                # In a sharp curve, don't trust a stale polynomial for long:
+                # switch to recovery steering after just a few stale frames.
+                curvature = abs(float(current_poly[0]))
+                max_age_in_curve = 4 if curvature > 0.03 else self.max_poly_age
+                if self.poly_age > max_age_in_curve:
+                    self._publish_recovery_steer()
+                    return
             else:
-                self.stop_qcar()
+                self._publish_recovery_steer()
                 return
         else:
             self.poly_age = 0
@@ -249,12 +256,17 @@ class PurePursuitVisionNode(Node):
         x_look = float(np.polyval(poly, y_look))
 
         if not (0.0 <= x_look <= float(self.img_w)):
-            x_look = cx
+            # Clamp to image edge instead of falling back to cx:
+            # in a sharp left turn the lookahead goes off-screen left (x<0);
+            # clamping to 0 keeps the maximum left-steering signal.
+            x_look = float(np.clip(x_look, 0.0, float(self.img_w)))
         elif abs(x_look - cx) > self.xlook_tol_px:
             x_look = cx
 
-        curv_offset      = min(self.k_curv_offset * abs(float(poly[0])), 100.0)
-        effective_offset = self.lateral_offset_px + curv_offset
+        curv_offset = min(self.k_curv_offset * abs(float(poly[0])), 100.0)
+        # Subtract curv_offset: in a curve the target shifts RIGHT, enlarging
+        # the left-steering error so the car doesn't under-steer the turn.
+        effective_offset = self.lateral_offset_px - curv_offset
 
         dx    = x_look - self.img_w / 2.0 + effective_offset
         alpha = math.atan2(dx, float(self.lookahead_rows))
@@ -275,6 +287,25 @@ class PurePursuitVisionNode(Node):
         cmd.vector.y        = 0.0
         cmd.vector.z        = 0.0
         self.pub.publish(cmd)
+
+    def _publish_recovery_steer(self):
+        # Circuit always turns left: prev_steer < 0 means left turn was active.
+        # Amplify it so the car completes the corner without stopping.
+        recovery = self.prev_steer
+        if abs(recovery) < 0.10:
+            recovery = -0.20  # fallback left turn when last steer was near-zero
+        recovery = float(np.clip(recovery * 1.5,
+                                 -self.max_steer_cmd, self.max_steer_cmd))
+        cmd = Vector3Stamped()
+        cmd.header.stamp    = self.get_clock().now().to_msg()
+        cmd.header.frame_id = 'base_link'
+        cmd.vector.x        = float(self.v_ref * 0.8)
+        cmd.vector.y        = float(-recovery)
+        cmd.vector.z        = 0.0
+        self.pub.publish(cmd)
+        self.get_logger().warn(
+            f'Línea perdida — recovery steer={math.degrees(-recovery):+.1f}°',
+            throttle_duration_sec=1.0)
 
     # ────────────────────────────────────────────────────────────────
     #  ANÁLISIS Y PLOTS

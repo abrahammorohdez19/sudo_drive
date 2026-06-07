@@ -27,11 +27,11 @@ def generate_launch_description():
             description='Velocidad de referencia (m/s).'),
         DeclareLaunchArgument('steer_gain',        default_value='18.0',
             description='Ganancia steering. Sube para curvas más cerradas.'),
-        DeclareLaunchArgument('lookahead_rows',    default_value='60',
-            description='Filas de lookahead. Sube = más suave, baja = más reactivo.'),
-        DeclareLaunchArgument('max_steer_rate',    default_value='0.10',
-            description='Rate limiter rad/ciclo.'),
-        DeclareLaunchArgument('steer_alpha',       default_value='0.55',
+        DeclareLaunchArgument('lookahead_rows',    default_value='90',
+            description='Filas de lookahead. Sube = anticipa curvas más temprano.'),
+        DeclareLaunchArgument('max_steer_rate',    default_value='0.20',
+            description='Rate limiter rad/ciclo. Sube = reacciona más rápido.'),
+        DeclareLaunchArgument('steer_alpha',       default_value='0.70',
             description='Filtro EMA. 1=sin filtro, 0=sin cambio.'),
         DeclareLaunchArgument('lateral_offset_px', default_value='220.0',
             description='Px a la derecha de la línea amarilla. '
@@ -40,6 +40,10 @@ def generate_launch_description():
             description='Frames con steering limitado al arranque.'),
         DeclareLaunchArgument('startup_max_steer',  default_value='0.20',
             description='Steering máximo durante startup_cap_frames (rad).'),
+        DeclareLaunchArgument('k_curv_offset',     default_value='2000.0',
+            description='Ganancia de offset en curvas (px/coef). '
+                        'Sube = más giro anticipado en curvas. '
+                        'El offset se RESTA al lateral_offset para trackeo izquierdo.'),
 
         Node(
             package='qcar_navigation',
@@ -55,7 +59,7 @@ def generate_launch_description():
                 'lateral_offset_px':  LaunchConfiguration('lateral_offset_px'),
                 'startup_cap_frames': LaunchConfiguration('startup_cap_frames'),
                 'startup_max_steer':  LaunchConfiguration('startup_max_steer'),
-                'k_curv_offset':      0.0,
+                'k_curv_offset':      LaunchConfiguration('k_curv_offset'),
             }],
         ),
     ])
