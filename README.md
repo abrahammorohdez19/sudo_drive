@@ -13,6 +13,7 @@ Full autonomous driving pipeline for the Quanser QCar1 platform, including:
 - LiDAR-based mapping and obstacle awareness
 - Supervisor node to coordinate the full navigation stack
 - CSI camera calibration utilities
+- Trafficlight and Stop sing detection
 
 ---
 
