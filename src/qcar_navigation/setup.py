@@ -42,6 +42,7 @@ setup(
             'lane_detection_sw_node_sim = qcar_navigation.lane_detection_sw_node_sim:main',
             'lane_visualizer_node_sim = qcar_navigation.lane_visualizer_node_sim:main',
             'pure_pursuit_vision_node_sim = qcar_navigation.pure_pursuit_vision_node_sim:main',
+            'pure_pursuit_natalia = qcar_navigation.pure_pursuit_natalia:main', #agregué esto
             'lidar_kalman_node_amh19_sim = qcar_navigation.lidar_kalman_node_amh19_sim:main',
             'qcar_lidar_alert_2_sim = qcar_navigation.qcar_lidar_alert_2_sim:main',
             # ── Odometría IMU (BNO055) ────────────────────────────────────

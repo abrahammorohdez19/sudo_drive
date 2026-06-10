@@ -47,7 +47,7 @@ def generate_launch_description():
 
         Node(
             package='qcar_navigation',
-            executable='pure_pursuit_vision_node',
+            executable='pure_pursuit_natalia', #modifiqué esto
             name='pure_pursuit_vision',
             output='screen',
             parameters=[{
