@@ -26,6 +26,9 @@ sudo_drive/
 │   ├── pure_pursuit/       # Pure Pursuit controller node
 │   └── supervisor/         # Mission supervisor node
 ├── trayectoria/            # Trajectory definitions and map overlays
+├── trafficlight_pkg/       # Detección de semáforos
+├── bridge_pkg/             # Puente de comunicación
+├── best.pt                 # Modelo YOLOv8 entrenado
 ├── map.jpg                 # LiDAR map of the track
 └── rosgraph-sudo.png       # ROS2 node graph
 ```
@@ -39,6 +42,8 @@ sudo_drive/
 - OpenCV (`cv2`)
 - NumPy
 - Quanser QCar1 hardware + ROS2 drivers
+- Ultralytics
+- Torch
 
 ---
 
@@ -67,6 +72,12 @@ ros2 run qcar_navigation lane_detection
 
 # Pure Pursuit controller only
 ros2 run qcar_navigation pure_pursuit
+
+# Trafficlight detection
+ros2 launch trafficlight_pkg/traffic_test_node
+
+#Supevisor node
+ros2 run bridge_pkg supervisor_node
 ```
 
 ---
